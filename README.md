@@ -1,6 +1,5 @@
-======================
-Deploying from desktop
-======================
+
+## Deploying from desktop
 
 On the rPi web dashboard:
 
@@ -15,9 +14,7 @@ The application will be automatically started.  Console output can be seen by
 enabling console output in the Vision Status tab.
 
 
-======================
-Local vs Robot Setup
-======================
+## Local vs Robot Setup
 
 For testing, SSH into the raspberrypi:
 ```bash
@@ -34,4 +31,4 @@ Now locate "ntmode"
 FOR testing locally: set "ntmode" to "server"
 FOR roborio: set "ntmode" to "client
 
-*to access network tables on a dashboard, change the target IP to that of the raspberrypi
+*to access network tables on a dashboard, change the target IP to that of the raspberrypi*
