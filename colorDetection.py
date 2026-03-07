@@ -75,6 +75,72 @@ def processFrame(input_stream, output_stream, ntinst: NetworkTableInstance):
 
         source.putFrame(result)
 
+def bawVison (input_stream, output_stream, ntinst: NetworkTableInstance):
+    sink = CameraServer.getVideo(input_stream)
+    source = CameraServer.putVideo("Yellow_Highlight", 320, 240)
+
+    nt = ntinst
+    
+    vision_table = nt.getTable("Vision")
+    yellow_detected_entry = vision_table.getBooleanTopic("yellowDetected").publish()
+    yellow_detected_entry.set(False)
+
+    img = np.zeros(shape=(240, 320, 3), dtype=np.uint8)
+
+    while True:
+        frame_time, img = sink.grabFrame(img)
+
+        if frame_time == 0:
+            source.notifyError(sink.getError())
+            yellow_detected_entry.set(False)
+            continue
+
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        # mask = cv2.inRange(hsv, COLOR_LOWER, COLOR_UPPER)
+
+
+
+        min_hue = 36/2 # opencv uses 180 degrees instead of 360 so divide by 2
+        max_hue = 90/2
+        min_sat = 100
+        max_sat = 255
+        min_val = 140
+        max_val = 255
+
+
+
+        binary_img = cv2.inRange(hsv, (min_hue, min_sat, min_val), (max_hue, max_sat, max_val))
+
+        kernel = np.ones((10, 10), np.uint8)
+        binary_img = cv2.morphologyEx(binary_img, cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(binary_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(img, contours, -1, (0,255,0), 3)
+
+
+        # mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        # mask = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel)
+
+        # contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # valid_contours = [c for c in contours if cv2.contourArea(c) >= MIN_CONTOUR_AREA]
+
+        # yellow_detected = len(valid_contours) > 0
+        # yellow_detected_entry.set(yellow_detected)
+
+        # gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # gray_bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        # inv_mask = cv2.bitwise_not(mask)
+        # yellow_part = cv2.bitwise_and(img, img, mask=mask)
+        # gray_part = cv2.bitwise_and(gray_bgr, gray_bgr, mask=inv_mask)
+        # result = cv2.add(yellow_part, gray_part)
+        
+        # for contour in valid_contours:
+        #     ((x, y), radius) = cv2.minEnclosingCircle(contour)
+        #     cv2.circle(result, (int(x), int(y)), int(radius), (0, 255, 0), 2)
+
+
+        source.putFrame(binary_img)
+
 
 def parseError(str):
     print("config error in '" + configFile + "': " + str, file=sys.stderr)
@@ -212,7 +278,7 @@ if __name__ == "__main__":
     if cameras:
         import threading
         vision_thread = threading.Thread(
-            target=processFrame,
+            target=bawVison,
             args=(cameras[0], None, ntinst),
             daemon=True
         )
