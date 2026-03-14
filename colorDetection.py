@@ -76,6 +76,149 @@ def processFrame(input_stream, output_stream, ntinst: NetworkTableInstance):
         source.putFrame(result)
 
 
+def ballArea (input_stream, output_stream, ntinst: NetworkTableInstance):
+    sink = CameraServer.getVideo(input_stream)
+    source = CameraServer.putVideo("Video", 320, 240)
+
+    nt = ntinst
+    
+    vision_table = nt.getTable("Vision")
+    yellow_area_entry = vision_table.getDoubleTopic("amountOfYellow").publish()
+    yellow_area_entry.set(0.0)
+    yellow_detected_entry = vision_table.getBooleanTopic("yellowDetected").publish()
+    yellow_detected_entry.set(False)
+
+    img = np.zeros(shape=(240, 320, 3), dtype=np.uint8)
+
+    while True:
+        frame_time, img = sink.grabFrame(img)
+
+        if frame_time == 0:
+            source.notifyError(sink.getError())
+            yellow_detected_entry.set(False)
+            continue
+
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+        min_hue = 45/2 # opencv uses 180 degrees instead of 360 so divide by 2
+        max_hue = 90/2
+        min_sat = 100
+        max_sat = 255
+        min_val = 140
+        max_val = 255
+
+        binary_img = cv2.inRange(hsv, (min_hue, min_sat, min_val), (max_hue, max_sat, max_val))
+
+        kernel = np.ones((5, 5), np.uint8)
+        binary_img = cv2.morphologyEx(binary_img, cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(binary_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        area = 0
+        for i in range(len(contours)):
+            if cv2.contourArea(contours[i]) > 500:
+                cv2.drawContours(img, contours, i, (0,255,0), 3)
+                area += cv2.contourArea(contours[i])
+        yellow_area_entry.set(area)
+        source.putFrame(img)
+        if area > 500.0:
+            yellow_detected_entry.set(True)
+        else:
+            yellow_detected_entry.set(False)
+
+
+def ballDetector (input_stream, output_stream, ntinst: NetworkTableInstance):
+    sink = CameraServer.getVideo(input_stream)
+    source = CameraServer.putVideo("Video", 320, 240)
+
+    nt = ntinst
+    
+    vision_table = nt.getTable("Vision")
+    radians_away_entry = vision_table.getDoubleTopic("radiansAway").publish()
+    radians_away_entry.set(0.0)
+    x_entry = vision_table.getDoubleTopic("x").publish()
+    x_entry.set(0.0)
+    y_entry = vision_table.getDoubleTopic("y").publish()
+    y_entry.set(0.0)
+
+    img = np.zeros(shape=(240, 320, 3), dtype=np.uint8)
+
+    r = 162
+    g = 222
+    b = 168
+    while True:
+        frame_time, img = sink.grabFrame(img)
+
+        if frame_time == 0:
+            source.notifyError(sink.getError())
+            continue
+
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+
+        min_hue = 36/2 # opencv uses 180 degrees instead of 360 so divide by 2
+        max_hue = 90/2
+        min_sat = 100
+        max_sat = 255
+        min_val = 140
+        max_val = 255
+
+        temp_x = 0
+        temp_y = 0
+
+        binary_img = cv2.inRange(hsv, (min_hue, min_sat, min_val), (max_hue, max_sat, max_val))
+
+        kernel = np.ones((15, 15), np.uint8)
+        binary_img = cv2.morphologyEx(binary_img, cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(binary_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # cv2.drawContours(img, contours, -1, (0,255,0), 3)
+        biggest = 0
+        for i in range(len(contours)):
+            area = cv2.contourArea(contours[i])
+            M = cv2.moments(contours[i])
+            if M['m00'] != 0:
+                cx = int(M['m10']/M['m00'])
+                cy = int(M['m01']/M['m00'])
+                if area > 100:
+                    cv2.circle(img, (cx, cy), 7, (0, 0, 255), -1)
+                    cv2.putText(img, "BALL HERE", (cx - 20, cy - 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (r, g, b), 2)
+                    if cv2.contourArea(contours[biggest]) < area:
+                        biggest = i
+                        temp_x = cx / 2
+                        temp_y = cy / 2
+        try:
+            cv2.drawContours(img, contours[biggest], -1, (255, 150, 0), 15)
+        except:
+            print("'nainhehjpoad'gohjaedh")
+
+        x_entry.set((temp_x-160)/160)
+        y_entry.set((temp_y-120)/120)
+
+        #         if cx < 320:
+        #             left += 1
+        #         else:
+        #             right += 1
+        # if left > right:
+        #     radians_away_entry.set(-1.0)
+        # else:
+        #     radians_away_entry.set(1.0)
+        # left_entry.set(left)
+        # right_entry.set(right)
+        
+        # for i in range(len(contours)):
+        #     area = cv2.contourArea(contours[i])
+        #     if area > 500:
+        #         new = cv2.fitEllipse(contours[i])
+        #         cv2.ellipse(img,new,(0,255,0),2)
+        #         if old != None:
+        #             if new > old:  
+        #                 biggest = i
+                # cv2.drawContours(img, contours[i], 0, (0,255,0), 3)
+        #        old = new
+        # radians_away_entry.set(i)
+        source.putFrame(img)
+
 def parseError(str):
     print("config error in '" + configFile + "': " + str, file=sys.stderr)
 
@@ -211,12 +354,18 @@ if __name__ == "__main__":
 
     if cameras:
         import threading
-        vision_thread = threading.Thread(
-            target=processFrame,
+        hopper_thread = threading.Thread(
+            target=ballArea,
             args=(cameras[0], None, ntinst),
             daemon=True
         )
-        vision_thread.start()
+        pathing_thread = threading.Thread(
+            target=ballDetector,
+            args=(cameras[1], None, ntinst),
+            daemon=True
+        )
+        hopper_thread.start()
+        pathing_thread.start()
         print("Color detection vision thread started.")
     else:
         print("No cameras found — vision thread not started.", file=sys.stderr)
