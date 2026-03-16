@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 
 from cscore import CameraServer, VideoSource, UsbCamera, MjpegServer
-from ntcore import NetworkTableInstance, EventFlags
+from ntcore import NetworkTableInstance, EventFlags, IntegerTopic
 
 configFile = "/boot/frc.json"
 
@@ -23,57 +23,6 @@ cameraConfigs = []
 switchedCameraConfigs = []
 cameras = []
 
-COLOR_LOWER = np.array([15, 100, 100])
-COLOR_UPPER = np.array([40, 255, 255])
-
-MIN_CONTOUR_AREA = 10000
-
-
-def processFrame(input_stream, output_stream, ntinst: NetworkTableInstance):
-    sink = CameraServer.getVideo(input_stream)
-    source = CameraServer.putVideo("Yellow_Highlight", 320, 240)
-
-    nt = ntinst
-    
-    vision_table = nt.getTable("Vision")
-    yellow_detected_entry = vision_table.getBooleanTopic("yellowDetected").publish()
-    yellow_detected_entry.set(False)
-
-    img = np.zeros(shape=(240, 320, 3), dtype=np.uint8)
-
-    while True:
-        frame_time, img = sink.grabFrame(img)
-
-        if frame_time == 0:
-            source.notifyError(sink.getError())
-            yellow_detected_entry.set(False)
-            continue
-
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, COLOR_LOWER, COLOR_UPPER)
-
-        kernel = np.ones((5, 5), np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel)
-
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        valid_contours = [c for c in contours if cv2.contourArea(c) >= MIN_CONTOUR_AREA]
-
-        yellow_detected = len(valid_contours) > 0
-        yellow_detected_entry.set(yellow_detected)
-
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        gray_bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-        inv_mask = cv2.bitwise_not(mask)
-        yellow_part = cv2.bitwise_and(img, img, mask=mask)
-        gray_part = cv2.bitwise_and(gray_bgr, gray_bgr, mask=inv_mask)
-        result = cv2.add(yellow_part, gray_part)
-        
-        for contour in valid_contours:
-            ((x, y), radius) = cv2.minEnclosingCircle(contour)
-            cv2.circle(result, (int(x), int(y)), int(radius), (0, 255, 0), 2)
-
-        source.putFrame(result)
 
 
 def ballArea (input_stream, output_stream, ntinst: NetworkTableInstance):
@@ -82,10 +31,17 @@ def ballArea (input_stream, output_stream, ntinst: NetworkTableInstance):
 
     nt = ntinst
     
-    vision_table = nt.getTable("Vision")
-    yellow_area_entry = vision_table.getDoubleTopic("amountOfYellow").publish()
+    vision_table = nt.getTable("RpiVision")
+    _min_hue = vision_table.getIntegerTopic("Min Hue").subscribe(0)
+    _max_hue = vision_table.getIntegerTopic("Max Hue").subscribe(0)
+    _min_sat = vision_table.getIntegerTopic("Min Sat").subscribe(0)
+    _max_sat = vision_table.getIntegerTopic("Max Sat").subscribe(0)
+    _min_val = vision_table.getIntegerTopic("Min Val").subscribe(0)
+    _max_val = vision_table.getIntegerTopic("Max Val").subscribe(0)
+
+    yellow_area_entry = vision_table.getDoubleTopic("YellowAreaInHopper").publish()
     yellow_area_entry.set(0.0)
-    yellow_detected_entry = vision_table.getBooleanTopic("yellowDetected").publish()
+    yellow_detected_entry = vision_table.getBooleanTopic("YellowDetectedInHopper").publish()
     yellow_detected_entry.set(False)
 
     img = np.zeros(shape=(240, 320, 3), dtype=np.uint8)
@@ -99,13 +55,12 @@ def ballArea (input_stream, output_stream, ntinst: NetworkTableInstance):
             continue
 
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-
-        min_hue = 45/2 # opencv uses 180 degrees instead of 360 so divide by 2
-        max_hue = 90/2
-        min_sat = 100
-        max_sat = 255
-        min_val = 140
-        max_val = 255
+        min_hue = _min_hue.get()
+        max_hue = _max_hue.get()
+        min_sat = _min_sat.get()
+        max_sat = _max_sat.get()
+        min_val = _min_val.get()
+        max_val = _max_val.get()
 
         binary_img = cv2.inRange(hsv, (min_hue, min_sat, min_val), (max_hue, max_sat, max_val))
 
@@ -132,9 +87,15 @@ def ballDetector (input_stream, output_stream, ntinst: NetworkTableInstance):
 
     nt = ntinst
     
-    vision_table = nt.getTable("Vision")
-    radians_away_entry = vision_table.getDoubleTopic("radiansAway").publish()
-    radians_away_entry.set(0.0)
+    vision_table = nt.getTable("RpiVision")
+
+    _min_hue = vision_table.getIntegerTopic("Min Hue").subscribe(0)
+    _max_hue = vision_table.getIntegerTopic("Max Hue").subscribe(0)
+    _min_sat = vision_table.getIntegerTopic("Min Sat").subscribe(0)
+    _max_sat = vision_table.getIntegerTopic("Max Sat").subscribe(0)
+    _min_val = vision_table.getIntegerTopic("Min Val").subscribe(0)
+    _max_val = vision_table.getIntegerTopic("Max Val").subscribe(0)
+
     x_entry = vision_table.getDoubleTopic("x").publish()
     x_entry.set(0.0)
     y_entry = vision_table.getDoubleTopic("y").publish()
@@ -153,14 +114,12 @@ def ballDetector (input_stream, output_stream, ntinst: NetworkTableInstance):
             continue
 
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-
-
-        min_hue = 36/2 # opencv uses 180 degrees instead of 360 so divide by 2
-        max_hue = 90/2
-        min_sat = 100
-        max_sat = 255
-        min_val = 140
-        max_val = 255
+        min_hue = _min_hue.get()
+        max_hue = _max_hue.get()
+        min_sat = _min_sat.get()
+        max_sat = _max_sat.get()
+        min_val = _min_val.get()
+        max_val = _max_val.get()
 
         temp_x = 0
         temp_y = 0
@@ -180,43 +139,21 @@ def ballDetector (input_stream, output_stream, ntinst: NetworkTableInstance):
                 cx = int(M['m10']/M['m00'])
                 cy = int(M['m01']/M['m00'])
                 if area > 100:
-                    cv2.circle(img, (cx, cy), 7, (0, 0, 255), -1)
-                    cv2.putText(img, "BALL HERE", (cx - 20, cy - 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (r, g, b), 2)
-                    if cv2.contourArea(contours[biggest]) < area:
+                    if cv2.contourArea(contours[biggest]) < area: # ts was moved it might break
+                        cv2.circle(img, (cx, cy), 7, (0, 0, 255), -1)
+                        cv2.putText(img, "BALL HERE", (cx - 20, cy - 20),cv2.FONT_HERSHEY_SIMPLEX, 0.5, (r, g, b), 2)
                         biggest = i
                         temp_x = cx / 2
                         temp_y = cy / 2
+        # the code highkey crashes when the camera moves so this ignores it
         try:
-            cv2.drawContours(img, contours[biggest], -1, (255, 150, 0), 15)
+            cv2.drawContours(img, contours[biggest], -1, (255, 150, 0), 15) 
         except:
-            print("'nainhehjpoad'gohjaedh")
+            print("ahhhh I can't see when you move too fast I'm gonna crash")
 
         x_entry.set((temp_x-160)/160)
         y_entry.set((temp_y-120)/120)
 
-        #         if cx < 320:
-        #             left += 1
-        #         else:
-        #             right += 1
-        # if left > right:
-        #     radians_away_entry.set(-1.0)
-        # else:
-        #     radians_away_entry.set(1.0)
-        # left_entry.set(left)
-        # right_entry.set(right)
-        
-        # for i in range(len(contours)):
-        #     area = cv2.contourArea(contours[i])
-        #     if area > 500:
-        #         new = cv2.fitEllipse(contours[i])
-        #         cv2.ellipse(img,new,(0,255,0),2)
-        #         if old != None:
-        #             if new > old:  
-        #                 biggest = i
-                # cv2.drawContours(img, contours[i], 0, (0,255,0), 3)
-        #        old = new
-        # radians_away_entry.set(i)
         source.putFrame(img)
 
 def parseError(str):
@@ -276,7 +213,7 @@ def readConfig():
         if str.lower() == "client":
             server = False
         elif str.lower() == "server":
-            server = True
+            server = False # supposed to be true 
         else:
             parseError("could not understand ntmode value '{}'".format(str))
     try:
@@ -303,7 +240,7 @@ def startCamera(config):
         server.setConfigJson(json.dumps(config.streamConfig))
     return camera
 
-def startSwitchedCamera(config):
+'''def startSwitchedCamera(config):
     print("Starting switched camera '{}' on {}".format(config.name, config.key))
     server = CameraServer.addSwitchedCamera(config.name)
     def listener(event):
@@ -326,7 +263,7 @@ def startSwitchedCamera(config):
         NetworkTableInstance.getDefault().getEntry(config.key),
         EventFlags.kImmediate | EventFlags.kValueAll,
         listener)
-    return server
+    return server '''
 
 if __name__ == "__main__":
     if len(sys.argv) >= 2:
@@ -343,7 +280,8 @@ if __name__ == "__main__":
     else:
         print("Setting up NetworkTables client for team {}".format(team))
         ntinst.startClient4("wpilibpi")
-        ntinst.setServerTeam(team)
+        # ntinst.setServerTeam(team) 
+        ntinst.setServer("192.168.42.213") # use team or ip, not both
         ntinst.startDSClient()
 
     for config in cameraConfigs:
@@ -356,12 +294,12 @@ if __name__ == "__main__":
         import threading
         hopper_thread = threading.Thread(
             target=ballArea,
-            args=(cameras[0], None, ntinst),
+            args=(cameras[1], None, ntinst),
             daemon=True
         )
         pathing_thread = threading.Thread(
             target=ballDetector,
-            args=(cameras[1], None, ntinst),
+            args=(cameras[0], None, ntinst),
             daemon=True
         )
         hopper_thread.start()
