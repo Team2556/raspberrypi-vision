@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 
 from cscore import CameraServer, VideoSource, UsbCamera, MjpegServer
-from ntcore import NetworkTableInstance, EventFlags, IntegerTopic
+from ntcore import NetworkTableInstance, EventFlags, IntegerTopic, DoubleArrayTopic
 
 configFile = "/boot/frc.json"
 
@@ -23,6 +23,45 @@ cameraConfigs = []
 switchedCameraConfigs = []
 cameras = []
 
+def compass (input_stream, output_stream, ntinst: NetworkTableInstance):
+    sink = CameraServer.getVideo(input_stream)
+    source = CameraServer.putVideo("Video", 640, 480)
+
+    nt = ntinst
+    drivetrain_table = nt.getTable("Drivetrain")
+    fms_table = nt.getTable("FMSInfo")
+    redteam_entry = fms_table.getBooleanTopic("IsRedAlliance").subscribe(False)
+    robot_entry = drivetrain_table.getDoubleArrayTopic("Field/Robot").subscribe([0,0,0])
+    
+
+    img = np.zeros(shape=(480, 640, 3), dtype=np.uint8)
+
+    while True:
+        frame_time, img = sink.grabFrame(img)
+
+        if redteam_entry.get() == True:
+            offset = 1.570795
+        else:
+            offset = -1.570795
+
+        degrees = robot_entry.get()
+        rad = np.radians(degrees[2])
+
+        x_coord = ((30 * np.cos(rad - offset))) + 320
+        y_coord = -((30 * np.sin(rad - offset))) + 30
+
+        # print("x: " + str(x_coord) + " y: " + str(y_coord))
+
+        if frame_time == 0:
+            source.notifyError(sink.getError())
+            continue
+
+        cv2.circle(img,(320,30), 20, (0,255,0), -1)
+        cv2.line(img,(int(x_coord),int(y_coord)),(320,30),(0,255,255),5)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(img,'COMPASS',(278,65), font, .5,(128,0,128),1,cv2.LINE_AA)
+
+        source.putFrame(img)
 
 
 def ballArea (input_stream, output_stream, ntinst: NetworkTableInstance):
@@ -149,7 +188,8 @@ def ballDetector (input_stream, output_stream, ntinst: NetworkTableInstance):
         try:
             cv2.drawContours(img, contours[biggest], -1, (255, 150, 0), 15) 
         except:
-            print("ahhhh I can't see when you move too fast I'm gonna crash")
+            # print("ahhhh I can't see when you move too fast I'm gonna crash")
+            print(biggest)
 
         x_entry.set((temp_x-160)/160)
         y_entry.set((temp_y-120)/120)
@@ -292,19 +332,19 @@ if __name__ == "__main__":
 
     if cameras:
         import threading
-        hopper_thread = threading.Thread(
-            target=ballArea,
-            args=(cameras[1], None, ntinst),
-            daemon=True
-        )
-        pathing_thread = threading.Thread(
-            target=ballDetector,
+        # hopper_thread = threading.Thread(
+        #     target=ballArea,
+        #     args=(cameras[1], None, ntinst),
+        #     daemon=True
+        # )
+        compass_thread = threading.Thread(
+            target=compass,
             args=(cameras[0], None, ntinst),
             daemon=True
         )
-        hopper_thread.start()
-        pathing_thread.start()
-        print("Color detection vision thread started.")
+        # hopper_thread.start()
+        compass_thread.start()
+        print("thread starting")
     else:
         print("No cameras found — vision thread not started.", file=sys.stderr)
 
